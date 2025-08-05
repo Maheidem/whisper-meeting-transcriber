@@ -44,8 +44,25 @@ htmlcov/
 test_*.wav
 test_*.mp4
 test_*.aiff
+test_*.py
+test_*.txt
+test_*.json
 *.wav
 *.mp4
+*.aiff
+
+# Old scripts
+main.py
+main_*.py
+diagnose_*.py
+check_*.py
+stop_*.py
+start_*.sh
+stop_*.sh
+transcribe_cli.py
+test_with_curl.sh
+whisper_api.json
+transcription_result.txt
 
 # Docker
 *.pid
@@ -58,3 +75,6 @@ test_*.aiff
 # OS specific
 Thumbs.db
 Desktop.ini
+
+# Documentation
+README_DOCKER.md

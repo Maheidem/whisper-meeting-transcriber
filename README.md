@@ -31,11 +31,18 @@ A powerful, containerized web application for transcribing meeting recordings us
    cd whisper-meeting-transcriber
    ```
 
-2. **Set up environment variables** (optional, for speaker diarization)
+2. **Set up environment variables** (required for WhisperX models with speaker diarization)
    ```bash
    cp .env.example .env
    # Edit .env and add your HuggingFace token
    ```
+   
+   **Important for WhisperX models**: You must:
+   - Create a HuggingFace account and get a token from https://huggingface.co/settings/tokens
+   - Accept the terms for pyannote models:
+     - https://huggingface.co/pyannote/speaker-diarization
+     - https://huggingface.co/pyannote/segmentation
+   - Add your token to the `.env` file
 
 3. **Start all services**
    ```bash

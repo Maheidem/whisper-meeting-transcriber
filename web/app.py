@@ -438,13 +438,22 @@ async def process_transcription(task_id: str, file_path: Path):
         # Start progress updates
         progress_task = asyncio.create_task(update_progress())
         
-        # Make request
-        with open(audio_file, 'rb') as f:
-            files = {'audio_file': f}
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: requests.post(url, files=files, params=params, timeout=3600)
-            )
+        # Make request with better error handling
+        try:
+            with open(audio_file, 'rb') as f:
+                files = {'audio_file': f}
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: requests.post(url, files=files, params=params, timeout=3600)
+                )
+        except requests.exceptions.ConnectionError as e:
+            if "RemoteDisconnected" in str(e):
+                if "whisperx" in task["settings"]["model"]:
+                    raise Exception("WhisperX models require HF_TOKEN environment variable. Please set it in .env file and restart.")
+                else:
+                    raise Exception("Whisper service connection lost. The file may be too large or the service crashed.")
+            else:
+                raise e
         
         # Cancel progress updates
         progress_task.cancel()
