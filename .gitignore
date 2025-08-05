@@ -41,6 +41,11 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+test_*.wav
+test_*.mp4
+test_*.aiff
+*.wav
+*.mp4
 
 # Docker
 *.pid
