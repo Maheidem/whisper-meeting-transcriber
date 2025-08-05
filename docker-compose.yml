@@ -1,0 +1,142 @@
+version: '3.8'
+
+networks:
+  whisper-network:
+    driver: bridge
+
+services:
+  # Web UI Service
+  whisper-webui:
+    build: ./web
+    container_name: whisper-webui
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER_URL=http://whisper-tiny:9000
+    volumes:
+      - ./web/uploads:/app/uploads
+      - ./web/results:/app/results
+    networks:
+      - whisper-network
+    depends_on:
+      - whisper-tiny
+      - whisper-base
+      - whisper-small
+      - whisper-medium
+      - whisper-tiny-faster
+      - whisper-base-faster
+      - whisper-tiny-whisperx
+      - whisper-base-whisperx
+    restart: unless-stopped
+  whisper-tiny:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-tiny
+    environment:
+      - ASR_MODEL=tiny
+      - ASR_ENGINE=openai_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  whisper-base:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-base
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=openai_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  whisper-small:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-small
+    environment:
+      - ASR_MODEL=small
+      - ASR_ENGINE=openai_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  whisper-medium:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-medium
+    environment:
+      - ASR_MODEL=medium
+      - ASR_ENGINE=openai_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  # Uncomment if you have enough RAM/VRAM
+  # whisper-large:
+  #   image: onerahmet/openai-whisper-asr-webservice:latest
+  #   container_name: whisper-large
+  #   ports:
+  #     - "9004:9000"
+  #   environment:
+  #     - ASR_MODEL=large-v3
+  #     - ASR_ENGINE=openai_whisper
+  #   volumes:
+  #     - /Users/maheidem/docker/whisper/cache:/root/.cache
+  #   restart: unless-stopped
+
+  # WhisperX versions (with speaker diarization)
+  whisper-tiny-whisperx:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-tiny-whisperx
+    environment:
+      - ASR_MODEL=tiny
+      - ASR_ENGINE=whisperx
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  whisper-base-whisperx:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-base-whisperx
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=whisperx
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  # Faster Whisper versions (more efficient)
+  whisper-tiny-faster:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-tiny-faster
+    environment:
+      - ASR_MODEL=tiny
+      - ASR_ENGINE=faster_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped
+
+  whisper-base-faster:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-base-faster
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=faster_whisper
+    volumes:
+      - /Users/maheidem/docker/whisper/cache:/root/.cache
+    networks:
+      - whisper-network
+    restart: unless-stopped

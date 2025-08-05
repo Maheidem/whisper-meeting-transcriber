@@ -1,0 +1,8 @@
+Yeah, of course.
+Thanks, Akshay.
+OK, so this is the high level diagram for building a product, we start from an idea and then we have like three routes to execute the idea to the finish line.
+The first approach is fast prototype approach.
+This is Akshay's favorite.
+So we basically moved from IDEA to fast prototyping using tools like Replit, V0, Lovable.
+We speedrun the process on the UI perspective and from that we start to generate product documentation, requirements, task specification, and at the end we execute tasks with Cursor at the backend and we continue work on tools like Replit.
+The more controlled way is the end-to-end MCP,
