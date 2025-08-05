@@ -10,6 +10,7 @@ import time
 import asyncio
 import tempfile
 import subprocess
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -80,6 +81,14 @@ class TranscriptionTask(BaseModel):
     settings: Dict[str, Any]
     created_at: datetime
     completed_at: Optional[datetime] = None
+    # Metrics
+    file_size_mb: Optional[float] = None
+    file_duration_seconds: Optional[float] = None
+    execution_time_seconds: Optional[float] = None
+    transcription_speed_ratio: Optional[float] = None
+    word_count: Optional[int] = None
+    model_used: Optional[str] = None
+    speakers_detected: Optional[int] = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -152,9 +161,14 @@ async def transcribe(
     
     # Save uploaded file
     upload_path = UPLOAD_DIR / f"{task_id}_{file.filename}"
+    content = await file.read()
+    file_size_mb = len(content) / (1024 * 1024)  # Convert to MB
+    
     async with aiofiles.open(upload_path, 'wb') as f:
-        content = await file.read()
         await f.write(content)
+    
+    # Get file duration
+    file_duration = await get_file_duration(upload_path)
     
     # Create task entry
     task = TranscriptionTask(
@@ -170,7 +184,10 @@ async def transcribe(
             "min_speakers": min_speakers,
             "max_speakers": max_speakers
         },
-        created_at=datetime.now()
+        created_at=datetime.now(),
+        file_size_mb=round(file_size_mb, 2),
+        file_duration_seconds=file_duration,
+        model_used=WHISPER_MODELS[model]["name"]
     )
     
     # Convert to dict with ISO format dates
@@ -288,6 +305,50 @@ async def notify_progress(task_id: str):
                 del websocket_connections[task_id]
 
 
+async def get_file_duration(file_path: Path) -> Optional[float]:
+    """Extract duration from audio/video file using ffprobe"""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            str(file_path)
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0 and stdout:
+            duration = float(stdout.decode().strip())
+            return duration
+        return None
+    except Exception as e:
+        print(f"Error getting file duration: {e}")
+        return None
+
+
+def count_words(text: str) -> int:
+    """Count words in transcription text"""
+    # Remove timestamps and speaker labels for accurate word count
+    cleaned_text = re.sub(r'\[\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\]', '', text)
+    cleaned_text = re.sub(r'\[SPEAKER_\d+\]:', '', cleaned_text)
+    cleaned_text = re.sub(r'\d+ \d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}', '', cleaned_text)
+    words = cleaned_text.split()
+    return len(words)
+
+
+def count_speakers_in_text(text: str) -> int:
+    """Count unique speakers in transcription"""
+    speaker_pattern = r'\[SPEAKER_(\d+)\]'
+    speakers = set(re.findall(speaker_pattern, text))
+    return len(speakers) if speakers else 1
+
+
 async def extract_audio(input_file: Path, task_id: str) -> Path:
     """Extract audio from video file"""
     output_file = UPLOAD_DIR / f"{task_id}_audio.wav"
@@ -329,6 +390,8 @@ async def extract_audio(input_file: Path, task_id: str) -> Path:
 
 async def process_transcription(task_id: str, file_path: Path):
     """Process transcription task"""
+    start_time = time.time()  # Track execution time
+    
     try:
         task = active_tasks[task_id]
         
@@ -392,27 +455,44 @@ async def process_transcription(task_id: str, file_path: Path):
             result_filename = f"{Path(task['filename']).stem}_transcription_{timestamp}.{task['settings']['output_format']}"
             result_path = RESULTS_DIR / result_filename
             
+            transcription_text = response.text
             with open(result_path, 'w', encoding='utf-8') as f:
                 if task["settings"]["output_format"] == "json":
                     json.dump(response.json(), f, indent=2)
                 else:
-                    f.write(response.text)
+                    f.write(transcription_text)
             
-            # Update task
+            # Calculate metrics
+            execution_time = time.time() - start_time
+            word_count = count_words(transcription_text)
+            speakers_detected = count_speakers_in_text(transcription_text) if task["settings"]["diarize"] else None
+            
+            # Calculate transcription speed ratio
+            speed_ratio = None
+            if task.get("file_duration_seconds") and task["file_duration_seconds"] > 0:
+                speed_ratio = task["file_duration_seconds"] / execution_time
+            
+            # Update task with metrics
             task["status"] = "completed"
             task["progress"] = 100
             task["message"] = "Transcription completed successfully"
             task["result_path"] = str(result_path)
             task["completed_at"] = datetime.now().isoformat()
+            task["execution_time_seconds"] = round(execution_time, 2)
+            task["word_count"] = word_count
+            task["speakers_detected"] = speakers_detected
+            task["transcription_speed_ratio"] = round(speed_ratio, 2) if speed_ratio else None
         else:
             raise Exception(f"Whisper service error: {response.status_code} - {response.text}")
         
     except Exception as e:
+        execution_time = time.time() - start_time
         task["status"] = "failed"
         task["progress"] = 0
         task["message"] = "Transcription failed"
         task["error"] = str(e)
         task["completed_at"] = datetime.now().isoformat()
+        task["execution_time_seconds"] = round(execution_time, 2)
     
     finally:
         # Clean up temporary files

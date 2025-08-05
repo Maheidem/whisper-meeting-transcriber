@@ -278,10 +278,36 @@ function updateTaskStatus(task) {
     
     updateProgress(task.progress, task.message);
     
+    // Show additional info during processing
+    if (task.status === 'processing' && statusMessage) {
+        let infoText = task.message;
+        if (task.file_duration_seconds) {
+            infoText += ` • Duration: ${formatTime(task.file_duration_seconds)}`;
+        }
+        if (task.file_size_mb) {
+            infoText += ` • Size: ${task.file_size_mb.toFixed(1)} MB`;
+        }
+        if (task.model_used) {
+            infoText += ` • Model: ${task.model_used}`;
+        }
+        statusText.textContent = infoText;
+    }
+    
     if (task.status === 'completed') {
-        showResults(task);
-        resetUI();
-        loadTaskHistory();
+        // Show completion metrics
+        if (task.execution_time_seconds && task.transcription_speed_ratio) {
+            const metricsText = `Completed in ${formatTime(task.execution_time_seconds)} (${task.transcription_speed_ratio.toFixed(1)}x speed)`;
+            updateProgress(100, metricsText);
+            setTimeout(() => {
+                showResults(task);
+                resetUI();
+                loadTaskHistory();
+            }, 2000); // Show metrics for 2 seconds
+        } else {
+            showResults(task);
+            resetUI();
+            loadTaskHistory();
+        }
     } else if (task.status === 'failed') {
         showError(task.error || 'Transcription failed');
         resetUI();
@@ -343,7 +369,7 @@ async function loadTaskHistory() {
         // Sort by creation time (newest first)
         tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         
-        // Display recent tasks
+        // Display recent tasks with metrics
         taskHistory.innerHTML = tasks.slice(0, 5).map(task => {
             const icon = task.status === 'completed' ? 'check-circle' : 
                         task.status === 'failed' ? 'times-circle' :
@@ -353,20 +379,43 @@ async function loadTaskHistory() {
                          task.status === 'failed' ? 'red' :
                          task.status === 'processing' ? 'blue' : 'gray';
             
+            // Format metrics
+            const metrics = [];
+            if (task.execution_time_seconds) {
+                metrics.push(`<span class="text-xs text-gray-600"><i class="fas fa-clock text-xs mr-1"></i>${formatTime(task.execution_time_seconds)}</span>`);
+            }
+            if (task.transcription_speed_ratio) {
+                metrics.push(`<span class="text-xs text-indigo-600 font-medium"><i class="fas fa-tachometer-alt text-xs mr-1"></i>${task.transcription_speed_ratio.toFixed(1)}x speed</span>`);
+            }
+            if (task.word_count) {
+                metrics.push(`<span class="text-xs text-gray-600"><i class="fas fa-file-word text-xs mr-1"></i>${task.word_count.toLocaleString()} words</span>`);
+            }
+            if (task.speakers_detected) {
+                metrics.push(`<span class="text-xs text-purple-600"><i class="fas fa-users text-xs mr-1"></i>${task.speakers_detected} speakers</span>`);
+            }
+            
             return `
-                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div class="flex items-center">
-                        <i class="fas fa-${icon} text-${color}-600 mr-3"></i>
-                        <div>
-                            <p class="font-medium text-sm">${task.filename}</p>
-                            <p class="text-xs text-gray-500">${formatDate(task.created_at)}</p>
+                <div class="p-4 bg-gray-50 rounded-lg mb-3 hover:bg-gray-100 transition">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-start">
+                            <i class="fas fa-${icon} text-${color}-600 mr-3 mt-1"></i>
+                            <div>
+                                <p class="font-medium text-sm">${task.filename}</p>
+                                <p class="text-xs text-gray-500 mb-1">${formatDate(task.created_at)}</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    ${task.model_used ? `<span class="text-xs text-gray-700 bg-gray-200 px-2 py-1 rounded">${task.model_used}</span>` : ''}
+                                    ${task.file_size_mb ? `<span class="text-xs text-gray-600">${task.file_size_mb.toFixed(1)} MB</span>` : ''}
+                                    ${task.file_duration_seconds ? `<span class="text-xs text-gray-600">${formatTime(task.file_duration_seconds)} duration</span>` : ''}
+                                </div>
+                                ${metrics.length > 0 ? `<div class="flex items-center gap-3 mt-2">${metrics.join('')}</div>` : ''}
+                            </div>
                         </div>
+                        ${task.status === 'completed' ? `
+                            <button onclick="downloadResult('${task.task_id}')" class="text-indigo-600 hover:text-indigo-800 ml-4">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        ` : ''}
                     </div>
-                    ${task.status === 'completed' ? `
-                        <button onclick="downloadResult('${task.task_id}')" class="text-indigo-600 hover:text-indigo-800">
-                            <i class="fas fa-download"></i>
-                        </button>
-                    ` : ''}
                 </div>
             `;
         }).join('');
@@ -426,4 +475,18 @@ function formatDate(dateString) {
     if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
     
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+}
+
+function formatTime(seconds) {
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)}s`;
+    } else if (seconds < 3600) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${minutes}m ${secs}s`;
+    } else {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+    }
 }
