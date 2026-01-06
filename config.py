@@ -31,15 +31,15 @@ PORT = int(os.getenv("PORT", "8000"))
 def detect_gpu_backend():
     """
     Auto-detect best available GPU backend.
-    Returns: 'mlx' (Mac), 'cuda' (Windows/Linux), or 'cpu'
+    Returns: 'metal' (Mac with whisper.cpp), 'cuda' (Windows/Linux), or 'cpu'
     """
-    # Check for Mac Apple Silicon → use MLX
+    # Check for Mac Apple Silicon -> use Metal via whisper.cpp (pywhispercpp)
     if platform.system() == "Darwin" and platform.machine() == "arm64":
         try:
-            import mlx.core
-            return "mlx"
+            from pywhispercpp.model import Model
+            return "metal"
         except ImportError:
-            pass  # MLX not installed
+            pass  # pywhispercpp not installed
 
     # Check for CUDA (Windows/Linux with NVIDIA GPU)
     try:
@@ -64,8 +64,8 @@ def get_gpu_info():
     """Get human-readable GPU info for display."""
     backend = detect_gpu_backend()
 
-    if backend == "mlx":
-        return {"backend": "mlx", "name": "Apple Silicon (MLX)", "available": True}
+    if backend == "metal":
+        return {"backend": "metal", "name": "Apple Silicon (Metal via whisper.cpp)", "available": True}
     elif backend == "cuda":
         try:
             import torch

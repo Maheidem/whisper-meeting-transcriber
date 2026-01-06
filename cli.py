@@ -26,8 +26,10 @@ def print_progress(progress: int, message: str):
         print()  # New line when done
 
 
-async def progress_callback(progress: int, message: str):
-    """Async wrapper for progress printing."""
+async def progress_callback(data: dict):
+    """Async wrapper for progress printing. Accepts dict from transcriber."""
+    progress = data.get("progress", 0)
+    message = data.get("message", "")
     print_progress(progress, message)
 
 

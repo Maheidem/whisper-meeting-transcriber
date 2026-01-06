@@ -2,9 +2,9 @@
 Transcriber - Core Whisper logic with lazy model loading.
 
 Supports multiple backends:
-- MLX (Apple Silicon) - fastest on Mac M1/M2/M3
-- CUDA (NVIDIA) - fastest on Windows/Linux with GPU
-- CPU - fallback for all platforms
+- Metal (Apple Silicon via whisper.cpp) - fastest on Mac M1/M2/M3
+- CUDA (NVIDIA via faster-whisper) - fastest on Windows/Linux with GPU
+- CPU (faster-whisper) - fallback for all platforms
 """
 import asyncio
 import subprocess
@@ -34,12 +34,12 @@ def get_active_backend():
     global _active_backend
     if _active_backend is None:
         # Determine best backend
-        if DEVICE == "mlx" or (DEVICE == "auto" and GPU_BACKEND == "mlx"):
+        if DEVICE == "metal" or (DEVICE == "auto" and GPU_BACKEND == "metal"):
             try:
-                import mlx_whisper
-                _active_backend = "mlx"
+                from pywhispercpp.model import Model as WhisperCppModel
+                _active_backend = "metal"
             except ImportError:
-                logger.warning("MLX requested but mlx-whisper not installed. Falling back.")
+                logger.warning("Metal requested but pywhispercpp not installed. Falling back to faster-whisper.")
                 _active_backend = "faster-whisper"
         else:
             _active_backend = "faster-whisper"
@@ -55,9 +55,9 @@ def get_model(model_name: str):
         logger.info(f"Loading model: {model_name} (backend={backend})")
         start_time = time.time()
 
-        if backend == "mlx":
-            # MLX backend for Apple Silicon
-            _model_cache[cache_key] = _load_mlx_model(model_name)
+        if backend == "metal":
+            # Metal backend for Apple Silicon (via whisper.cpp)
+            _model_cache[cache_key] = _load_metal_model(model_name)
         else:
             # faster-whisper backend (CUDA or CPU)
             _model_cache[cache_key] = _load_faster_whisper_model(model_name)
@@ -70,19 +70,24 @@ def get_model(model_name: str):
     return _model_cache[cache_key]
 
 
-def _load_mlx_model(model_name: str):
-    """Load model using MLX (Apple Silicon optimized)."""
-    # MLX-whisper uses a different model naming convention
-    mlx_model_map = {
-        "tiny": "mlx-community/whisper-tiny-mlx",
-        "base": "mlx-community/whisper-base-mlx",
-        "small": "mlx-community/whisper-small-mlx",
-        "medium": "mlx-community/whisper-medium-mlx",
-        "large-v3": "mlx-community/whisper-large-v3-mlx",
-    }
-    mlx_model = mlx_model_map.get(model_name, f"mlx-community/whisper-{model_name}-mlx")
-    logger.info(f"Loading MLX model: {mlx_model}")
-    return {"type": "mlx", "model_id": mlx_model, "name": model_name}
+def _load_metal_model(model_name: str):
+    """Load model using whisper.cpp with Metal acceleration (Apple Silicon)."""
+    from pywhispercpp.model import Model as WhisperCppModel
+    import os
+
+    # pywhispercpp uses standard model names: tiny, base, small, medium, large-v3
+    # It auto-downloads from HuggingFace if not present
+    n_threads = os.cpu_count() or 4
+    logger.info(f"Loading whisper.cpp model: {model_name} (threads={n_threads})")
+
+    model = WhisperCppModel(
+        model=model_name,
+        models_dir=str(MODELS_DIR),
+        n_threads=n_threads,
+        print_realtime=False,
+        print_progress=False,
+    )
+    return {"type": "metal", "model": model, "name": model_name}
 
 
 def _load_faster_whisper_model(model_name: str):
@@ -327,33 +332,40 @@ async def transcribe(
             """Transcription runs in separate thread (works with both backends)."""
             model_info = model  # model is actually a dict with backend info
 
-            if model_info["type"] == "mlx":
-                # MLX backend (Apple Silicon)
-                import mlx_whisper
-                result = mlx_whisper.transcribe(
+            if model_info["type"] == "metal":
+                # Metal backend (Apple Silicon via whisper.cpp)
+                whispercpp_model = model_info["model"]
+
+                # Detect language if auto
+                detected_lang = lang_param
+                if not detected_lang:
+                    try:
+                        (detected_lang, _), _ = whispercpp_model.auto_detect_language(str(audio_path))
+                        logger.info(f"Auto-detected language: {detected_lang}")
+                    except Exception as e:
+                        logger.warning(f"Language auto-detection failed: {e}, defaulting to 'en'")
+                        detected_lang = "en"
+
+                # Transcribe with whisper.cpp
+                # Note: pywhispercpp timestamps are in 10ms units (t0=100 means 1 second)
+                raw_segments = whispercpp_model.transcribe(
                     str(audio_path),
-                    path_or_hf_repo=model_info["model_id"],
-                    language=lang_param,
-                    word_timestamps=diarize,
+                    language=detected_lang if detected_lang else "",
                 )
-                # Convert MLX result format to our standard format
+
+                # Convert whisper.cpp segments to our standard format
                 segments = []
-                for seg in result.get("segments", []):
+                for seg in raw_segments:
                     seg_dict = {
-                        "start": seg["start"],
-                        "end": seg["end"],
-                        "text": seg["text"].strip(),
+                        "start": seg.t0 / 100.0,  # Convert from 10ms units to seconds
+                        "end": seg.t1 / 100.0,
+                        "text": seg.text.strip(),
                     }
-                    if "words" in seg:
-                        seg_dict["words"] = [
-                            {"word": w["word"], "start": w["start"], "end": w["end"]}
-                            for w in seg["words"]
-                        ]
                     segments.append(seg_dict)
 
                 # Create info-like object for compatibility
                 class Info:
-                    language = result.get("language", lang_param or "en")
+                    language = detected_lang or "en"
                 return segments, Info()
 
             else:
