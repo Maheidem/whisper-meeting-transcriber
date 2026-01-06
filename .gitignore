@@ -9,11 +9,6 @@ venv/
 ENV/
 .venv/
 pip-log.txt
-pip-delete-this-directory.txt
-
-# Virtual environments
-web/venv/
-web/env/
 
 # IDE
 .vscode/
@@ -27,42 +22,36 @@ web/env/
 .env.local
 .env.*.local
 
-# Application specific
-web/uploads/*
-web/results/*
-!web/uploads/.gitkeep
-!web/results/.gitkeep
+# Application directories
+uploads/*
+results/*
+models/*
+!uploads/.gitkeep
+!results/.gitkeep
+!models/.gitkeep
 
 # Logs
 *.log
-logs/
+logs/*
+!logs/.gitkeep
 
 # Testing
 .coverage
 htmlcov/
 .pytest_cache/
-test_*.wav
-test_*.mp4
-test_*.aiff
-test_*.py
-test_*.txt
-test_*.json
+
+# Media files (don't commit recordings)
 *.wav
 *.mp4
+*.mp3
+*.m4a
 *.aiff
-
-# Old scripts
-main.py
-main_*.py
-diagnose_*.py
-check_*.py
-stop_*.py
-start_*.sh
-stop_*.sh
-transcribe_cli.py
-test_with_curl.sh
-whisper_api.json
-transcription_result.txt
+*.flac
+*.ogg
+*.avi
+*.mov
+*.mkv
+*.webm
 
 # Docker
 *.pid
@@ -76,5 +65,9 @@ transcription_result.txt
 Thumbs.db
 Desktop.ini
 
-# Documentation
-README_DOCKER.md
+# Recordings directory content
+recordings/*
+!recordings/.gitkeep
+
+# Claude scratchpad
+.scratchpad/

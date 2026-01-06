@@ -1,219 +1,204 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## Project Overview
 
-This is a Whisper Meeting Transcriber - a comprehensive application that transcribes meeting videos using a Whisper ASR (Automatic Speech Recognition) Docker service with support for speaker diarization (speaker identification). The project now includes three interfaces: GUI (tkinter), CLI, and Web UI.
+Meeting Transcriber - a lean web application that transcribes meeting recordings using faster-whisper with optional speaker diarization. Direct Python integration, no Docker containers for inference.
 
 ## Architecture
 
-The application provides three interfaces:
-
-### GUI Application (`main.py`)
-- Uses tkinter for the graphical interface
-- Communicates with a Whisper ASR service via HTTP API (default: http://localhost:9000)
-- Supports multiple output formats (txt, srt, vtt, json, tsv)
-- Handles file uploads and transcription results
-- Provides auto-save functionality with timestamps
-- Includes speaker diarization controls
-
-### CLI Application (`transcribe_cli.py`)
-- Command-line interface for batch processing
-- Progress bars for audio extraction and transcription
-- Full speaker diarization support
-- Suitable for automation and scripting
-
-### Web UI Application (`web/`)
-- Modern web-based interface using FastAPI backend
-- Real-time progress updates via WebSocket
-- Drag-and-drop file upload
-- Mobile-responsive design with Tailwind CSS
-- Task history and management
-- No client installation required
-
-## Key Components
-
-### WhisperTranscriber Class
-Main application class that manages:
-- GUI setup and layout
-- File selection and validation
-- API communication with Whisper service
-- Transcription processing in separate threads
-- Result display and file saving
-
-### API Integration
-- Endpoint: `/asr` for transcription requests
-- Expects multipart form data with audio file
-- Parameters: `task` (transcribe) and `output` (format)
-- Connection testing via `/docs` endpoint
-
-## Speaker Diarization (Speaker Identification)
-
-The application supports speaker diarization to identify different speakers in meetings and conversations.
-
-### GUI Usage
-1. Check the "Enable Speaker Diarization" checkbox
-2. Optionally set minimum and maximum expected speakers
-3. Select JSON output format to see speaker labels
-4. Transcribe as normal
-
-### CLI Usage
-```bash
-# Basic diarization
-python transcribe_cli.py video.mp4 --diarize -f json
-
-# With speaker count hints
-python transcribe_cli.py video.mp4 --diarize --min-speakers 2 --max-speakers 4 -f json
-
-# Save to specific file
-python transcribe_cli.py video.mp4 --diarize -f json -o meeting_transcript.json
+```
+Browser → FastAPI (app.py) → faster-whisper (transcriber.py) → Results
+   CLI → (cli.py) ────────────────────┘
 ```
 
-### Diarization Output
-When using JSON format with diarization enabled, the output includes:
-- Speaker labels (SPEAKER_01, SPEAKER_02, etc.)
-- Word-level speaker attribution
-- Segment-level speaker identification
+**Key Design Decisions:**
+- Direct Python Whisper calls (no HTTP overhead)
+- Models lazy-loaded and cached in memory
+- Single process, no microservices
+- Optional Docker for deployment (not inference)
+- Auto-detection of GPU backend (MLX for Apple Silicon, CUDA for NVIDIA, CPU fallback)
 
-Example JSON output:
-```json
-{
-  "segments": [
-    {
-      "start": 0.554,
-      "end": 2.437,
-      "text": "Hello, everyone.",
-      "speaker": "SPEAKER_01",
-      "words": [
-        {
-          "word": "Hello,",
-          "start": 0.554,
-          "end": 0.955,
-          "speaker": "SPEAKER_01"
-        }
-      ]
-    }
-  ]
-}
-```
+## Key Files
 
-### Important Notes
-- Diarization works best with clear audio and distinct speakers
-- The `min_speakers` and `max_speakers` parameters help improve accuracy
-- Processing time increases with diarization enabled
-- Best results typically with 2-6 speakers
+| File | Purpose |
+|------|---------|
+| `app.py` | FastAPI web server, routes, WebSocket progress |
+| `transcriber.py` | Core Whisper logic, audio extraction, formatting |
+| `config.py` | All settings in one place |
+| `cli.py` | Command-line interface for transcription |
+| `logging_config.py` | Centralized structured logging configuration |
+| `templates/index.html` | Web UI (gets models from API) |
+| `static/app.js` | Frontend JavaScript |
 
 ## Development Commands
 
-### Running the Applications
-
-GUI Application:
+### Run Locally
 ```bash
-python3 main.py
+# Install dependencies
+pip install -r requirements.txt
+brew install ffmpeg  # macOS
+
+# Run server
+python app.py
+# or with auto-reload:
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-CLI Application:
+### CLI Usage
 ```bash
-python3 transcribe_cli.py --help
+# Basic transcription
+python cli.py video.mp4
+
+# With options
+python cli.py audio.wav -m small -l en -f srt
+
+# With speaker diarization
+python cli.py meeting.mp4 --diarize --min-speakers 2 --max-speakers 4
+
+# List available options
+python cli.py --list-models
+python cli.py --list-languages
 ```
 
-Web UI Application:
+### Run with Docker
 ```bash
-cd web
-./run_server.sh
-# Or manually:
-# python3 -m venv venv
-# source venv/bin/activate
-# pip install -r requirements.txt
-# uvicorn app:app --reload --host 0.0.0.0 --port 8000
+docker-compose up -d
 ```
 
-Access the Web UI at: http://localhost:8000
+### Access
+http://localhost:8000
 
-### Dependencies
-The application requires:
-- Python 3.x with tkinter (usually included)
-- `requests` library for HTTP communication
-- `ffmpeg` for video to audio conversion
+## Configuration
 
-Install dependencies:
-```bash
-pip install requests
-# Install ffmpeg via homebrew on macOS:
-brew install ffmpeg
+All settings in `config.py`:
+- `DEFAULT_MODEL`: Whisper model (tiny, base, small, medium, large-v3)
+- `DEVICE`: auto, cpu, cuda, or mlx
+- `GPU_BACKEND`: Auto-detected (mlx for Apple Silicon, cuda for NVIDIA, cpu fallback)
+- `HF_TOKEN`: HuggingFace token for speaker diarization
+- `COMPUTE_TYPE`: float16 (GPU) or int8 (CPU)
+
+### GPU Auto-Detection
+
+The system automatically detects the best available backend:
+- **Apple Silicon (M-series)**: Uses MLX for GPU acceleration
+- **NVIDIA GPU**: Uses CUDA
+- **No GPU**: Falls back to CPU
+
+Check current status via `/gpu` endpoint.
+
+## Speaker Diarization
+
+Requires:
+1. HuggingFace token (set via web UI Settings or `HF_TOKEN` env var)
+2. `pip install git+https://github.com/m-bain/whisperX.git`
+3. Accept pyannote model terms on HuggingFace
+
+### Speaker Range Parameters
+
+The `/transcribe` endpoint accepts optional speaker hints:
+- `min_speakers`: Minimum expected speakers
+- `max_speakers`: Maximum expected speakers
+
+## Language Support
+
+40+ supported languages available. Key languages include:
+- Auto-detect, English, Spanish, French, German, Italian, Portuguese
+- Russian, Japanese, Chinese, Korean, Arabic, Hindi
+- Full list: `/languages` endpoint or `python cli.py --list-languages`
+
+## API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | Web UI |
+| `/health` | GET | Health check |
+| `/gpu` | GET | GPU status and acceleration info |
+| `/models` | GET | Available models |
+| `/formats` | GET | Output formats |
+| `/languages` | GET | Available languages |
+| `/transcribe` | POST | Start transcription |
+| `/ws/{task_id}` | WS | Progress updates |
+| `/status/{task_id}` | GET | Polling fallback |
+| `/result/{task_id}` | GET | Download result |
+| `/tasks` | GET | List all tasks |
+| `/task/{task_id}` | DELETE | Delete a task and its result file |
+| `/settings` | GET | Get current settings (token masked) |
+| `/settings` | POST | Save HuggingFace token to .env |
+
+## Progress Tracking
+
+Transcription progress includes detailed steps:
+- `extracting`: Extracting audio from file
+- `loading_model`: Loading Whisper model
+- `transcribing`: Running transcription
+- `diarizing`: Speaker identification (if enabled)
+- `formatting`: Generating output format
+- `complete`: Task finished
+
+Progress data includes:
+- `audio_duration`: Total audio length
+- `current_time`: Current position during transcription
+- `segments_processed` / `segments_total`: Segment counts
+
+## Data Flow
+
+1. User uploads file via `/transcribe`
+2. File saved to `uploads/`
+3. Background task starts transcription
+4. Progress sent via WebSocket (with step details)
+5. Result saved to `results/`
+6. Temp files cleaned up
+
+## Adding New Models
+
+Edit `config.py`:
+```python
+AVAILABLE_MODELS = {
+    "new-model": {
+        "name": "Display Name",
+        "description": "Description",
+        "supports_diarization": True
+    }
+}
 ```
 
-### Whisper Service Setup
-The application expects a Whisper ASR service running at http://localhost:9000. This is typically provided via Docker:
-```bash
-docker run -d -p 9000:9000 --name whisper onerahmet/openai-whisper-asr-webservice:latest
+Frontend automatically picks up changes from `/models` endpoint.
+
+## Output Formats
+
+- `txt`: Plain text (with speaker labels if diarization enabled)
+- `srt`: SubRip subtitles
+- `vtt`: WebVTT subtitles
+- `json`: Full data with segments, timestamps, speakers
+- `tsv`: Tab-separated values
+
+## Logging
+
+Logs written to `logs/transcriber.log` with structured format:
+```
+[timestamp] [LEVEL] [COMPONENT] message
 ```
 
-**Important**: The Whisper service only accepts audio files (WAV format works best). Video files (MP4, AVI, etc.) must be converted to audio first.
+Components: APP, TRANSCRIBER, WEBSOCKET, UVICORN
 
-## Common Development Tasks
+Use `logging_config.get_logger("component")` for new modules.
 
-### Testing Connection
-Use the "Test Connection" button in the GUI or verify the service is accessible at the configured URL's `/docs` endpoint.
+## Troubleshooting
 
-### Adding New Output Formats
-Modify the `formats` list in `setup_ui()` method (line 60) to add new transcription output formats supported by the Whisper service.
+### Model Download Slow
+Models download on first use (~500MB-3GB). Be patient.
 
-### Modifying Default Settings
-- Default Whisper URL: Line 25 (`http://localhost:9000`)
-- Default output format: Line 24 (`txt`)
-- Supported file types: Lines 112-115 in `select_file()`
+### Out of Memory
+Use smaller model (tiny or base) or increase system RAM.
 
-### Error Handling
-The application handles:
-- Connection errors to Whisper service
-- File upload timeouts (3600 seconds)
-- Invalid responses from the API
-- File I/O errors during saving
+### Diarization Not Working
+- Check `HF_TOKEN` is set (via Settings page or .env)
+- Verify pyannote terms accepted on HuggingFace
+- Install whisperx: `pip install git+https://github.com/m-bain/whisperX.git`
 
-## Threading Considerations
-
-Transcription runs in a separate thread to prevent UI freezing. Key thread-safe operations:
-- UI updates are performed on the main thread
-- Progress indicator runs during processing
-- Button states are managed to prevent concurrent operations
-
-## File Organization
-
-The application uses auto-save functionality that:
-- Saves transcriptions in the same directory as the source video
-- Uses naming format: `{original_name}_transcription_{timestamp}.{format}`
-- Timestamp format: YYYYMMDD_HHMMSS
-
-## Known Issues and Solutions
-
-### Video File Transcription
-The Whisper service cannot process video files directly. The application now includes automatic audio extraction using ffmpeg for video formats (MP4, AVI, MOV, MKV, WEBM).
-
-### Large Files
-For large video files, the application:
-1. Extracts audio to a temporary WAV file
-2. Sends the audio to Whisper service
-3. Cleans up temporary files after transcription
-
-### Progress Tracking
-The application includes:
-- Progress bar showing extraction and transcription progress
-- Real-time status updates during processing
-- Ability to stop transcription mid-process
-
-**Note**: The Whisper ASR webservice does not provide real-time progress updates. Progress bars show estimates based on file size and typical processing times. Actual transcription happens server-side without progress callbacks.
-
-### Stopping Transcription
-- Click the "Stop" button to cancel ongoing transcription
-- The app will terminate FFmpeg processes and close HTTP connections
-- If Whisper container is using high CPU (>10%), it will be restarted to cancel processing
-- Temporary files are cleaned up automatically
-
-### Resource Cleanup
-When closing the application or stopping transcription:
-- Active FFmpeg processes are terminated
-- HTTP connections are closed
-- Temporary audio files are deleted
-- Whisper container is restarted if necessary to stop processing
+### GPU Not Detected
+- Check `/gpu` endpoint for current backend status
+- Apple Silicon: Ensure mlx is installed (`pip install mlx`)
+- NVIDIA: Ensure CUDA and torch are properly installed

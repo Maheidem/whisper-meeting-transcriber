@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Transcriber</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .drop-zone { transition: all 0.3s ease; }
+        .drop-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
+        .progress-bar {
+            transition: width 0.5s ease-out;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        }
+        .progress-bar-animated {
+            background: linear-gradient(90deg, #3b82f6, #60a5fa, #3b82f6);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        .step-dot {
+            transition: all 0.3s ease;
+        }
+        .step-dot.completed {
+            background-color: #10b981;
+            border-color: #10b981;
+        }
+        .step-dot.active {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+        }
+        .step-line {
+            transition: background-color 0.3s ease;
+        }
+        .step-line.completed {
+            background-color: #10b981;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-2xl">
+        <h1 class="text-3xl font-bold text-center mb-2">Meeting Transcriber</h1>
+        <p class="text-gray-600 text-center mb-2">Upload a video or audio file to transcribe</p>
+
+        <!-- GPU Status Badge -->
+        <div id="gpuStatus" class="flex justify-center mb-6">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600">
+                <span class="w-2 h-2 rounded-full bg-gray-400 mr-2"></span>
+                Checking...
+            </span>
+        </div>
+
+        <!-- Upload Form -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <form id="uploadForm">
+                <!-- Drop Zone -->
+                <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer mb-4">
+                    <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                    <p class="text-gray-600 mb-2">Drag & drop a file here, or click to select</p>
+                    <p class="text-sm text-gray-400">Supports: MP4, AVI, MOV, MKV, WEBM, WAV, MP3, FLAC, M4A</p>
+                    <input type="file" id="fileInput" class="hidden" accept=".mp4,.avi,.mov,.mkv,.webm,.m4v,.wav,.mp3,.flac,.ogg,.m4a,.aac">
+                </div>
+                <p id="selectedFile" class="text-sm text-gray-600 mb-4 hidden"></p>
+
+                <!-- Options -->
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                        <select id="modelSelect" class="w-full border rounded-lg px-3 py-2">
+                            <!-- Populated from API -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Language</label>
+                        <select id="languageSelect" class="w-full border rounded-lg px-3 py-2">
+                            <!-- Populated from API -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Format</label>
+                        <select id="formatSelect" class="w-full border rounded-lg px-3 py-2">
+                            <!-- Populated from API -->
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Diarization -->
+                <div class="mb-4">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="diarizeCheck" class="mr-2">
+                        <span class="text-sm text-gray-700">Enable Speaker Identification</span>
+                    </label>
+                    <div id="speakerOptions" class="hidden mt-2 grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-600">Min Speakers</label>
+                            <input type="number" id="minSpeakers" min="1" max="20" class="w-full border rounded px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600">Max Speakers</label>
+                            <input type="number" id="maxSpeakers" min="1" max="20" class="w-full border rounded px-3 py-2">
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn" class="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    Transcribe
+                </button>
+            </form>
+        </div>
+
+        <!-- Progress -->
+        <div id="progressSection" class="bg-white rounded-lg shadow-md p-6 mb-6 hidden">
+            <!-- File info header -->
+            <div id="progressFileInfo" class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <svg class="h-5 w-5 text-gray-400 spinner" id="progressSpinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span id="progressFilename" class="font-medium text-gray-700 truncate max-w-xs"></span>
+                </div>
+                <span id="progressFileSize" class="text-sm text-gray-500"></span>
+            </div>
+
+            <!-- Step indicators -->
+            <div class="flex items-center justify-between mb-6 px-2">
+                <div class="flex flex-col items-center">
+                    <div id="step-upload" class="step-dot w-8 h-8 rounded-full border-2 border-gray-300 bg-white flex items-center justify-center text-xs font-medium completed">
+                        <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <span class="text-xs text-gray-500 mt-1">Upload</span>
+                </div>
+                <div id="line-1" class="step-line flex-1 h-0.5 bg-gray-300 mx-2"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-extract" class="step-dot w-8 h-8 rounded-full border-2 border-gray-300 bg-white flex items-center justify-center text-xs font-medium text-gray-400">
+                        2
+                    </div>
+                    <span class="text-xs text-gray-500 mt-1">Extract</span>
+                </div>
+                <div id="line-2" class="step-line flex-1 h-0.5 bg-gray-300 mx-2"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-transcribe" class="step-dot w-8 h-8 rounded-full border-2 border-gray-300 bg-white flex items-center justify-center text-xs font-medium text-gray-400">
+                        3
+                    </div>
+                    <span class="text-xs text-gray-500 mt-1">Transcribe</span>
+                </div>
+                <div id="line-3" class="step-line flex-1 h-0.5 bg-gray-300 mx-2 hidden" data-diarize="true"></div>
+                <div id="step-diarize-container" class="flex flex-col items-center hidden" data-diarize="true">
+                    <div id="step-diarize" class="step-dot w-8 h-8 rounded-full border-2 border-gray-300 bg-white flex items-center justify-center text-xs font-medium text-gray-400">
+                        4
+                    </div>
+                    <span class="text-xs text-gray-500 mt-1">Speakers</span>
+                </div>
+                <div id="line-4" class="step-line flex-1 h-0.5 bg-gray-300 mx-2"></div>
+                <div class="flex flex-col items-center">
+                    <div id="step-complete" class="step-dot w-8 h-8 rounded-full border-2 border-gray-300 bg-white flex items-center justify-center text-xs font-medium text-gray-400">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <span class="text-xs text-gray-500 mt-1">Done</span>
+                </div>
+            </div>
+
+            <!-- Progress bar with percentage -->
+            <div class="mb-4">
+                <div class="flex justify-between items-center mb-1">
+                    <span id="progressStepName" class="text-sm font-medium text-gray-700">Starting...</span>
+                    <span id="progressPercent" class="text-sm font-medium text-blue-600">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div id="progressBar" class="progress-bar progress-bar-animated h-3 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Detailed message -->
+            <p id="progressText" class="text-sm text-gray-600 mb-3">Preparing...</p>
+
+            <!-- Substep detail (optional) -->
+            <p id="progressSubstep" class="text-xs text-gray-400 italic hidden"></p>
+
+            <!-- Stats row -->
+            <div class="flex items-center justify-between text-xs text-gray-500 mt-4 pt-4 border-t border-gray-100">
+                <div class="flex items-center gap-4">
+                    <span id="progressElapsed" class="flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Elapsed: <strong id="elapsedTime">0:00</strong></span>
+                    </span>
+                    <span id="progressETA" class="flex items-center gap-1 hidden">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span>ETA: <strong id="etaTime">--:--</strong></span>
+                    </span>
+                </div>
+                <span id="progressSpeed" class="hidden">
+                    Processing at <strong id="speedValue">--</strong>x realtime
+                </span>
+            </div>
+
+            <!-- Audio duration info -->
+            <div id="progressAudioInfo" class="text-xs text-gray-400 mt-2 hidden">
+                Audio duration: <span id="audioDuration">--:--</span>
+            </div>
+        </div>
+
+        <!-- Result -->
+        <div id="resultSection" class="bg-white rounded-lg shadow-md p-6 mb-6 hidden">
+            <h2 class="font-semibold mb-2 text-green-600">Transcription Complete!</h2>
+            <div id="resultStats" class="text-sm text-gray-600 mb-4"></div>
+            <button id="downloadBtn" class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700">
+                Download Result
+            </button>
+        </div>
+
+        <!-- Error -->
+        <div id="errorSection" class="bg-red-50 border border-red-200 rounded-lg p-6 mb-6 hidden">
+            <h2 class="font-semibold text-red-600 mb-2">Error</h2>
+            <p id="errorText" class="text-sm text-red-600"></p>
+        </div>
+
+        <!-- Task History -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="font-semibold mb-4">Recent Transcriptions</h2>
+            <div id="taskHistory" class="space-y-2">
+                <p class="text-gray-400 text-sm">No transcriptions yet</p>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <button id="settingsToggle" class="flex items-center justify-between w-full text-left">
+                <h2 class="font-semibold">Settings</h2>
+                <svg id="settingsArrow" class="h-5 w-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            <div id="settingsPanel" class="hidden mt-4">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">HuggingFace Token</label>
+                    <p class="text-xs text-gray-500 mb-2">Required for speaker diarization. Get your token from <a href="https://huggingface.co/settings/tokens" target="_blank" class="text-blue-600 hover:underline">huggingface.co</a></p>
+                    <div class="flex gap-2">
+                        <input type="password" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxx" class="flex-1 border rounded-lg px-3 py-2">
+                        <button id="toggleTokenVisibility" type="button" class="px-3 py-2 text-gray-500 hover:text-gray-700">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="tokenStatus" class="mt-2 text-sm"></div>
+                </div>
+                <div class="flex gap-2">
+                    <button id="saveSettingsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                        Save
+                    </button>
+                    <span id="settingsFeedback" class="text-sm self-center"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>
