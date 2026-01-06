@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(lsof:*), Bash(kill:*)
+allowed-tools: Bash
 description: Stop the Meeting Transcriber application running on port 8000
 ---
 
@@ -8,8 +8,8 @@ Stop the Meeting Transcriber web application by finding and terminating the proc
 ## Workflow
 
 1. **Find Process**: Look for process using port 8000
-   - Execute: `lsof -ti:8000`
-   - This returns the PID(s) of processes on port 8000
+   - Execute: `netstat -ano | findstr :8000`
+   - Parse output to find PID (last column of LISTENING row)
    - Store PID for next step
 
 2. **Validate Process**: Check if process exists
@@ -21,49 +21,40 @@ Stop the Meeting Transcriber web application by finding and terminating the proc
      - Report: "Found process {PID} on port 8000"
      - Proceed to termination
 
-3. **Terminate Process**: Kill the process gracefully
-   - Execute: `kill {PID}` (SIGTERM - graceful shutdown)
-   - Wait 2 seconds for graceful shutdown
+3. **Terminate Process**: Kill the process
+   - Execute: `taskkill //PID {PID} //F`
+   - Note: Use double slashes for taskkill flags in Git Bash
 
 4. **Verify Termination**: Confirm process stopped
-   - Check if port 8000 is now free: `lsof -ti:8000`
-   - If port is free:
+   - Check if port 8000 is now free: `netstat -ano | findstr :8000`
+   - If port is free (exit code 1 = no match):
      - Report: "Meeting Transcriber stopped successfully"
      - Status: SUCCESS
    - If port still occupied:
-     - Force kill: `kill -9 {PID}` (SIGKILL)
-     - Verify again
-     - Report: "Meeting Transcriber force-stopped (was unresponsive)"
+     - Report error and PID
 
 5. **Final Report**:
    ```
    Meeting Transcriber stopped
    - Process {PID} terminated
    - Port 8000 is now available
-   - To restart: /project:start-transcriber
+   - To restart: /start-transcriber
    ```
 
 ## Error Handling
 
 If multiple PIDs found on port 8000:
 - Report: "Multiple processes found on port 8000: {PIDs}"
-- Terminate all: `kill {PID1} {PID2} ...`
+- Terminate all using taskkill
 - Report: "Stopped all processes on port 8000"
 
-If kill command fails:
-- Try force kill: `kill -9 {PID}`
-- If still fails:
-  - Report: "Failed to stop process {PID}"
-  - Suggest: "You may need to stop it manually with: sudo kill -9 {PID}"
-  - Status: FAIL
-
-If permission denied:
-- Report: "Permission denied when trying to kill process {PID}"
-- Suggest: "Try running manually: kill {PID}"
-- STOP execution
+If taskkill command fails:
+- Report: "Failed to stop process {PID}"
+- Suggest: "Try running manually in PowerShell: Stop-Process -Id {PID} -Force"
+- Status: FAIL
 
 ## Platform Notes
 
-- Uses `lsof` (macOS/Linux standard tool)
-- Uses `kill` with SIGTERM (15) then SIGKILL (9) if needed
-- Tested on macOS (Darwin)
+- Uses `netstat -ano` to find process (Windows)
+- Uses `taskkill //PID {PID} //F` to terminate (double slashes for Git Bash)
+- Tested on Windows 11

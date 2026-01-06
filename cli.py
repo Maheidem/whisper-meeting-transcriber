@@ -20,7 +20,7 @@ def print_progress(progress: int, message: str):
     """Print progress bar to terminal."""
     bar_width = 40
     filled = int(bar_width * progress / 100)
-    bar = "█" * filled + "░" * (bar_width - filled)
+    bar = "#" * filled + "-" * (bar_width - filled)
     print(f"\r[{bar}] {progress}% - {message}", end="", flush=True)
     if progress >= 100:
         print()  # New line when done

@@ -14,11 +14,29 @@ from typing import Optional, Callable
 from datetime import datetime
 import time
 
+import shutil
+
 from config import (
     DEVICE, COMPUTE_TYPE, HF_TOKEN, MODELS_DIR, GPU_BACKEND,
-    SUPPORTED_VIDEO_EXTENSIONS, RESULTS_DIR
+    SUPPORTED_VIDEO_EXTENSIONS, RESULTS_DIR, BASE_DIR
 )
 from logging_config import get_logger
+
+
+def _find_ffmpeg_binary(name: str) -> str:
+    """Find ffmpeg/ffprobe binary, checking system PATH then project directory."""
+    # Check system PATH first
+    system_path = shutil.which(name)
+    if system_path:
+        return system_path
+
+    # Check project directory (local installation)
+    local_path = BASE_DIR / f"{name}.exe"
+    if local_path.exists():
+        return str(local_path)
+
+    # Fallback to just the name (will fail with clear error)
+    return name
 
 # Logger for transcriber module
 logger = get_logger("transcriber")
@@ -169,10 +187,13 @@ def get_diarize_pipeline():
             # WhisperX 3.x: DiarizationPipeline is in whisperx.diarize submodule
             from whisperx.diarize import DiarizationPipeline
 
-            # Determine device for diarization
-            diarize_device = DEVICE if DEVICE not in ("auto", "mlx") else "cpu"
-            if GPU_BACKEND == "cuda" and DEVICE == "auto":
-                diarize_device = "cuda"
+            # Determine device for diarization (use CUDA if available)
+            if torch.cuda.is_available():
+                diarize_device = torch.device("cuda")
+                logger.info(f"Diarization will use CUDA ({torch.cuda.get_device_name(0)})")
+            else:
+                diarize_device = torch.device("cpu")
+                logger.info("Diarization will use CPU (CUDA not available)")
 
             _diarize_pipeline = DiarizationPipeline(
                 use_auth_token=HF_TOKEN,
@@ -198,7 +219,7 @@ async def extract_audio(video_path: Path, progress_callback: Optional[Callable] 
     start_time = time.time()
 
     cmd = [
-        "ffmpeg", "-y", "-i", str(video_path),
+        _find_ffmpeg_binary("ffmpeg"), "-y", "-i", str(video_path),
         "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
         str(audio_path)
     ]
@@ -226,7 +247,7 @@ def get_audio_duration(file_path: Path) -> float:
     """Get audio/video duration in seconds using ffprobe."""
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            [_find_ffmpeg_binary("ffprobe"), "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(file_path)],
             capture_output=True, text=True
         )
@@ -465,6 +486,12 @@ async def transcribe(
                     })
 
                 try:
+                    # Add project directory to PATH for ffmpeg (whisperx uses subprocess)
+                    import os
+                    env_path = os.environ.get("PATH", "")
+                    if str(BASE_DIR) not in env_path:
+                        os.environ["PATH"] = str(BASE_DIR) + os.pathsep + env_path
+
                     import whisperx
                     diarize_start = time.time()
 

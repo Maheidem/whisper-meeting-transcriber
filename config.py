@@ -49,10 +49,10 @@ def detect_gpu_backend():
     except ImportError:
         pass
 
-    # Check if faster-whisper CUDA works
+    # Check if faster-whisper CUDA works (ctranslate2 backend)
     try:
         import ctranslate2
-        if "cuda" in ctranslate2.get_supported_compute_types("cuda"):
+        if ctranslate2.get_cuda_device_count() > 0:
             return "cuda"
     except:
         pass
@@ -67,14 +67,35 @@ def get_gpu_info():
     if backend == "metal":
         return {"backend": "metal", "name": "Apple Silicon (Metal via whisper.cpp)", "available": True}
     elif backend == "cuda":
-        try:
-            import torch
-            gpu_name = torch.cuda.get_device_name(0)
-            return {"backend": "cuda", "name": f"NVIDIA {gpu_name}", "available": True}
-        except:
-            return {"backend": "cuda", "name": "NVIDIA CUDA", "available": True}
+        gpu_name = _get_nvidia_gpu_name()
+        return {"backend": "cuda", "name": gpu_name, "available": True}
     else:
         return {"backend": "cpu", "name": "CPU (no GPU detected)", "available": False}
+
+
+def _get_nvidia_gpu_name():
+    """Get NVIDIA GPU name via torch or nvidia-smi."""
+    # Try PyTorch first
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_name(0)
+    except ImportError:
+        pass
+
+    # Fall back to nvidia-smi
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except:
+        pass
+
+    return "NVIDIA CUDA GPU"
 
 
 # Whisper Settings
@@ -174,3 +195,6 @@ TRANSCRIPTION_TIMEOUT = int(os.getenv("TRANSCRIPTION_TIMEOUT", "3600"))  # 1 hou
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
 SUPPORTED_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS | SUPPORTED_AUDIO_EXTENSIONS
+
+# Task persistence
+TASK_META_SUFFIX = ".meta.json"

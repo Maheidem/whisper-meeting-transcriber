@@ -5,6 +5,7 @@ A simple web app for transcribing meetings using Whisper.
 No Docker containers for inference - direct Python calls.
 """
 import asyncio
+import json
 import uuid
 import traceback
 from datetime import datetime
@@ -19,7 +20,7 @@ from starlette.requests import Request
 from pydantic import BaseModel
 
 import config
-from config import is_hf_token_configured, reload_env, ENV_FILE, get_gpu_info, GPU_BACKEND
+from config import is_hf_token_configured, reload_env, ENV_FILE, get_gpu_info, GPU_BACKEND, TASK_META_SUFFIX, RESULTS_DIR
 from transcriber import transcribe, format_output, save_result, get_audio_duration, get_active_backend
 from logging_config import get_logger, configure_uvicorn_logging
 
@@ -40,6 +41,46 @@ logger.info("Meeting Transcriber starting up")
 logger.info(f"Upload directory: {config.UPLOAD_DIR}")
 logger.info(f"Results directory: {config.RESULTS_DIR}")
 logger.info(f"GPU Backend: {GPU_BACKEND} ({get_gpu_info()['name']})")
+
+
+def load_persisted_tasks():
+    """Load task metadata from result files on startup."""
+    loaded = 0
+    for meta_file in RESULTS_DIR.glob(f"*{TASK_META_SUFFIX}"):
+        try:
+            # Check if corresponding result file exists
+            result_filename = meta_file.name.replace(TASK_META_SUFFIX, "")
+            result_path = RESULTS_DIR / result_filename
+            if not result_path.exists():
+                logger.warning(f"Orphaned meta file (result missing): {meta_file.name}")
+                continue
+
+            with open(meta_file, "r", encoding="utf-8") as f:
+                task = json.load(f)
+
+            task_id = task.get("task_id")
+            if not task_id:
+                logger.warning(f"Meta file missing task_id: {meta_file.name}")
+                continue
+
+            # Handle duplicate task_ids by preferring newer files
+            if task_id in tasks:
+                existing_completed = tasks[task_id].get("completed_at", "")
+                new_completed = task.get("completed_at", "")
+                if new_completed <= existing_completed:
+                    continue
+
+            tasks[task_id] = task
+            loaded += 1
+        except Exception as e:
+            logger.warning(f"Failed to load meta file {meta_file.name}: {e}")
+
+    if loaded > 0:
+        logger.info(f"Loaded {loaded} persisted task(s) from results directory")
+
+
+# Load persisted tasks on module load
+load_persisted_tasks()
 
 
 class TaskStatus(BaseModel):
@@ -297,6 +338,16 @@ async def process_task(task_id: str):
 
         await notify_websocket(task_id)
 
+        # Persist task metadata for server restart recovery
+        try:
+            meta_path = output_path.parent / f"{output_path.name}{TASK_META_SUFFIX}"
+            task_data = {k: v for k, v in task.items() if k != "upload_path"}
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(task_data, f, indent=2)
+            logger.debug(f"Task metadata saved: {meta_path.name}")
+        except Exception as meta_err:
+            logger.warning(f"Failed to save task metadata: {meta_err}")
+
     except Exception as e:
         task["status"] = "failed"
         task["error"] = str(e)
@@ -440,6 +491,12 @@ async def delete_task(task_id: str):
         if result_path.exists():
             result_path.unlink()
             logger.info(f"Deleted result file: {result_path.name}")
+
+        # Delete meta file if exists
+        meta_path = result_path.parent / f"{result_path.name}{TASK_META_SUFFIX}"
+        if meta_path.exists():
+            meta_path.unlink()
+            logger.debug(f"Deleted meta file: {meta_path.name}")
 
     # Remove from memory
     del tasks[task_id]
